@@ -36,7 +36,7 @@ function OceanOptics_replay_OpeningFcn(gui_object, ~, h, varargin)
 
     % Clear matlab terminal 
     clc
-        
+    
     % Get arugments from live script, implied order:
     % diameter,k,length,temp left, temp right,resistance1,resistance2
     h.invars=cell2mat(varargin);
@@ -72,7 +72,7 @@ function OceanOptics_replay_OpeningFcn(gui_object, ~, h, varargin)
     if (isfield(h,'figure1')==1)
         h = process_fields(h);
     end
-    
+       
     % Import Data
     h=freq_import(gui_object, h,h.fname);
     
@@ -86,6 +86,10 @@ function h=plot_data_init(gui_object,h)
     % Extract Initial Data
      % Already have: h.lambda, h.uncal_spectra, and h.cal_spectra
      
+    % Turn Everything Off 
+    h.mgui.freq_panel.Visible='Off';
+    h.mgui.time_panel.Visible='Off';
+    
     % Get Data From Invars 
     % ***********************************************
     
@@ -118,52 +122,57 @@ function h=plot_data_init(gui_object,h)
     % ***********************************************
     h=update_all_data(h);   
     
-    % Initialize Frequency Plot
+    % Get Empty YData to placehold
+    zlambda=NaN(h.nlambda,1);
+    zframes=NaN(h.nframes,1);
+    
+    % Placeholder Plots (Data is added wiht YData/XData)
     axes(h.fgui.figure);  
     cla(h.fgui.figure);
     cla reset; grid on; hold on;
-    h.fgui.fplot_raw=plot( h.fdat.lambda, h.fdat.yraw,'k.','MarkerSize',3);
-    h.fgui.fplot_fit=plot( h.fdat.lambda, h.fdat.yfit,'-r' );
-    h.fgui.fplot_tmp=plot( h.fdat.lambda, h.fdat.ytmp,'b.','MarkerSize',3 );
-    yl=ylim;
-    h.fgui.fplot_leftx =line([h.fdat.fit.xleft,h.fdat.fit.xleft],...
-                        [yl(1),yl(2)],...
-                        'Color',[0.25,0.25,0.25],'LineStyle','--');
-    h.fgui.fplot_rightx=line([h.fdat.fit.xright,h.fdat.fit.xright],...
-                        [yl(1),yl(2)],...
-                        'Color',[0.25,0.25,0.25],'LineStyle','--');
-    legend('Raw Spectra','Fitted Curve','Held Curve',...
-            'Fit Limits')
+    h.fgui.fplot_raw=plot( h.fdat.lambda, zlambda,'k.','MarkerSize',3);
+    h.fgui.fplot_fit=plot( h.fdat.lambda, zlambda,'-r' );
+    h.fgui.fplot_tmp=plot( h.fdat.lambda, zlambda,'b.','MarkerSize',3 );
+    h.fgui.fplot_leftx =line([0,0],[0,0],'Color',[0.25,0.25,0.25],'LineStyle','--');
+    h.fgui.fplot_rightx=line([0,0],[0,0],'Color',[0.25,0.25,0.25],'LineStyle','--');
+    legend('Raw Spectra','Fitted Curve','Held Curve','Fit Limits')
     title('Measured Spectrum')
     xlabel('Wavelength (nm)');
-    ylabel('Abs. Spectral Irradiance (\muW/cm^2/nm)');
+    ylabel('Abs. Spectral Irradiance (\muW/cm^2/\mum)');
     hold off;
     
     % Initialize Time Plot
     axes(h.tgui.figure);
     cla(h.tgui.figure);
     cla reset; grid on; hold on
+    
+    % Emissivity Axis (Right)
+    yyaxis right
+    h.tgui.eps     =plot( h.tdat.time, zframes, 'r.','MarkerSize',8);
+    h.tgui.eps_nonc=plot( h.tdat.time, zframes, 'rx','MarkerSize',8);
+    h.tgui.pcirc2=scatter(0,0,80,'b','+','linewidth',2);
+    ylabel('Emissivity');
+    
+    %  Temperature Axis (Left)
     yyaxis left
-    h.tgui.cont=plot( h.tdat.time, h.tdat.cont, 'k.','MarkerSize',8);
-    h.tgui.nocont=plot( h.tdat.time, h.tdat.nocont, 'kx','MarkerSize',8);
-    h.tgui.vline=line( [h.tdat.time(h.iframe),h.tdat.time(h.iframe)],...
-                         ylim,'Color',[0.25,0.25,0.25],...
-                         'LineStyle','--');
-    yl=ylim;
-    h.tgui.ptext=text( h.tdat.time(h.iframe)*1.02, yl(2)*0.8,{'T = 1000 K'});
+    h.tgui.cont  =plot( h.tdat.time, zframes,   'k.','MarkerSize',8);
+    h.tgui.nocont=plot( h.tdat.time, zframes, 'kx','MarkerSize',8);
+    h.tgui.vline =line( [0,0],[0,0],'Color',[0.25,0.25,0.25],'LineStyle','--');
+    h.tgui.pcirc =scatter(0,0,80,'g','+','linewidth',2);
+    
+    legend('Converged Temps','Non-Converged Temps','Spectrum Frame',...
+           'Current Frame Values','Converged Emissivity','Non-Converged Emissivity')
     title('Fitted Temperatures')
     xlabel('Time (sec)');
     ylabel('Temperature (Kelvin)');
-    yyaxis right
-    h.tgui.eps=plot( h.tdat.time, h.tdat.eps, 'r.','MarkerSize',8);
-    h.tgui.eps_nonc=plot( h.tdat.time, h.tdat.eps_nonc, 'rx','MarkerSize',8);
-    ylabel('Emissivity');
-    legend('Non-Converged Temps','Converged Temps','Spectrum Frame',...
-           'Converged Emissivity','Non-Converged Emissivity')
     hold off;
     
     % Update Data for plots given initial data set
     h=update_plot(gui_object,h,[1,1]);
+    
+    % Turn Everything on 
+    h.mgui.freq_panel.Visible='On';
+    h.mgui.time_panel.Visible='On';
     
 end
 
@@ -388,13 +397,13 @@ function h=update_calibration_data(h)
         h.fdat.ylim(2)=max(max(h.fdat.matrix));
         
         % Reset Y Axis Label
-        h.fgui.figure.YLabel.String='Abs. Spectral Irradiance (\muW/cm^2/nm)';
+        h.fgui.figure.YLabel.String='Abs. Spectral Irradiance (\muW/cm^2/\mum)';
         
         % Make Time-domain Panel Visible
         h.mgui.plimits_panel.Visible='On';
         h.mgui.tseries_panel.Visible='On'; 
         h.tgui.export.Visible='On';
-        h.tgui.ptext.Visible='On';
+        h.tgui.pcirc.Visible='On';
         h.fdat.fit.display=1;
         h.mgui.temp_fit_panel.Visible='On';
         h.tdat.noncont_flag=1;      % Default plot raw temps
@@ -432,7 +441,7 @@ function h=update_calibration_data(h)
         h.mgui.plimits_panel.Visible='Off';
         h.mgui.tseries_panel.Visible='Off'; 
         h.tgui.export.Visible='Off';
-        h.tgui.ptext.Visible='Off';
+        h.tgui.circ.Visible='Off';
         h.fdat.fit.display=0;
         h.mgui.temp_fit_panel.Visible='Off';
         h.tdat.noncont_flag=0;     
@@ -496,6 +505,7 @@ function h=update_plot(gui_object,h,flags)
         axes(h.tgui.figure);
         h.tgui.nocont.YData=h.tdat.nocont;
         h.tgui.eps.YData=h.tdat.eps;
+        h.tgui.eps_nonc.YData=h.tdat.eps_nonc;
         h.tgui.cont.YData=h.tdat.cont;
         
         % Set Axes colors
@@ -542,20 +552,26 @@ function h=update_plot(gui_object,h,flags)
         end
         h.tgui.vline.YData=yl;
         
-        % Set Text Position
-        if (h.tdat.log_flag_left_flag==1)
-            h.tgui.ptext.Position=[h.tdat.time(h.iframe)*1.02, yl(2)*0.1];
-        else
-            h.tgui.ptext.Position=[h.tdat.time(h.iframe)*1.02, yl(2)*0.9];
+        % Get Temperature Value
+        val1 = h.tdat.cont(h.iframe);
+        if (isnan(val1)==1)
+            val1=h.tdat.nocont(h.iframe);
         end
         
-        % Set Text String
-        val = h.tdat.cont(h.iframe);
-        if (isnan(val)==1)
-            val=h.tdat.nocont(h.iframe);
+        % Get emissivity Value
+         val2 = h.tdat.eps(h.iframe);
+        if (isnan(val2)==1)
+            val2=h.tdat.eps_nonc(h.iframe);
         end
-        str =num2str(val,'%10.2g');
-        h.tgui.ptext.String={['T = ',str,' K']};
+        
+        % Edit Circle Location
+        h.tgui.pcirc.XData=[h.tdat.time(h.iframe)];
+        h.tgui.pcirc.YData=[val1];
+        
+        % Update Emissivity Circle
+        yyaxis(h.tgui.figure,'right')
+        h.tgui.pcirc2.XData=[h.tdat.time(h.iframe)];
+        h.tgui.pcirc2.YData=[val2];
         
     end
     
@@ -1032,7 +1048,7 @@ function h=export_data_Callback(gui_object, h)
     data=h;
     
     % Strip Down Root
-    fields={'invars','fname','mgui','fgui','tgui','iframe','export_data'};
+    fields={'invars','fname','mgui','fgui','tgui','iframe'};
     data=rmfield(data,fields);
     
     % Strip fdat
@@ -1116,6 +1132,7 @@ function h = process_fields(h)
     h.mgui.xleft_text       = h.time_xleft_text;
     h.mgui.eps_min_text     = h.time_eps_min_text;
     h.mgui.eps_max_text     = h.time_eps_max_text;
+    h.mgui.export_data      = h.export_data;
     
     % Copy Handles - Frequency Pane
     h.fgui.figure           = h.freq_fig;
@@ -1170,7 +1187,7 @@ function h = process_fields(h)
             'time_yright_text'    ,'time_yleft_text'    ,'time_xright_text'    ,...
             'time_xleft_text'     ,'time_eps_min_text'  ,'time_eps_max_text'   ,...
             'temp_log_flag_right','time_converged_emissivity_nonc','save_mat',...
-            'time_eps_max','time_eps_min'};
+            'time_eps_max','time_eps_min','export_data'};
     
     % Remove Fields
     h=rmfield(h,fields);

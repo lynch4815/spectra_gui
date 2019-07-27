@@ -1,0 +1,1134 @@
+% *************************************************************************
+%  OCEAN OPTICS GUI GUIDE
+%   Joel Lynch - 7/21/19
+%   Running this script runs the subserquent function, which then
+%   runs OpeningFcn, when in turn either opens file in UI or hardcoded
+%   h.invars contains initial parameters, which are used to generate
+%   initial GUI state in "plot_data_init" function
+%     After initial GUI call, changes in UI causes callbacks that point to
+%     various functions. Thses call "update_data" and then "update_plot"
+% *************************************************************************
+function varargout = OceanOptics_replay(varargin)
+
+    % Begin initialization code - DO NOT EDIT
+    gui_Singleton = 1;
+    gui_State = struct('gui_Name',       mfilename, ...
+                       'gui_Singleton',  gui_Singleton, ...
+                       'gui_OpeningFcn', @OceanOptics_replay_OpeningFcn, ...
+                       'gui_OutputFcn',  @OceanOptics_replay_OutputFcn, ...
+                       'gui_LayoutFcn',  [] , ...
+                       'gui_Callback',   []);
+    if nargin && ischar(varargin{1})
+        gui_State.gui_Callback = str2func(varargin{1});
+    end
+
+    if nargout
+        [varargout{1:nargout}] = gui_mainfcn(gui_State, varargin{:});
+    else
+        gui_mainfcn(gui_State, varargin{:});
+    end
+end
+
+% *************************************************************************
+%  GUI Initialization - runs once!
+% *************************************************************************
+function OceanOptics_replay_OpeningFcn(gui_object, ~, h, varargin)
+
+    % Clear matlab terminal 
+    clc
+        
+    % Get arugments from live script, implied order:
+    % diameter,k,length,temp left, temp right,resistance1,resistance2
+    h.invars=cell2mat(varargin);
+
+    % Check for number of arugments
+    n_inarg=15; % number of input arguments
+    if(length(h.invars)~=n_inarg)
+       h.invars(1:n_inarg)=[1, ... % Use hardcoded file 'test.mat',0=get UI
+                            1,...  % Flag for calibrated dat (1=ON)  
+                            925,...  % Index for inital time frame (1)
+                            0.0,...% EMPTY
+                            0, ...   % Flag for Display Fit 
+                            650, ... % Initial Left-Bound for Fitting (nm)
+                            750, ... % Initial right-bound for fitting (nm)
+                            300, ... % Initial Left bound for plotting raw
+                            900.0,... % Initial Right bound for plotting
+                            1.0, ... % Initial Y lower limit
+                            10.0,...  % Intiial Y Upper Limiy - Spectral Irradiance
+                            1, ... % Use Log Scale on Irradiance  
+                            1,...  % Use Log Scale on Temp
+                            1,...  % Log Scale on Emissivity
+                            1e-2]; % ABS. Spectra Threshold for evaluating tfit (uW/cm^2/str/nm)
+    end
+    
+    % Load File - program then proceeds to plot_data_init 
+    if (h.invars(1)==1) % use preloaded file
+       h.fname='test.mat';
+    else
+        h.fname='';
+    end
+    
+    % Process Handles - If opening a new fig
+    if (isfield(h,'figure1')==1)
+        h = process_fields(h);
+    end
+    
+    % Import Data
+    h=freq_import(gui_object, h,h.fname);
+    
+end
+
+% *************************************************************************
+%  Data Initalization - Called at start and reset
+% *************************************************************************
+function h=plot_data_init(gui_object,h)
+    
+    % Extract Initial Data
+     % Already have: h.lambda, h.uncal_spectra, and h.cal_spectra
+     
+    % Get Data From Invars 
+    % ***********************************************
+    
+    % Get Constants From invars
+    h.iframe=h.invars(3); % Default Index
+    h.fdat.lambda=h.raw.lambda;
+    h.fdat.calibration_flag=h.invars(2); % type
+    h.fdat.xleft=h.invars(8);
+    h.fdat.xright=h.invars(9);
+    h.fdat.ylim(1:2)=h.invars(10:11);
+    h.fdat.log_flag=h.invars(12);
+    h.tdat.log_flag_left_flag=h.invars(13);
+    h.tdat.log_flag_right_flag=h.invars(14);    
+    h.fdat.spectra_threshold=h.invars(15);
+    
+    % Freq - Default Constants (not inputted by user)
+    h.fdat.hold_frame=0; % Default to off
+    h.fdat.null_flame=0; % Default to keep frame
+    h.tdat.noncont_flag=1; % Default plot raw temps
+    h.tdat.emissivity_flag=1;
+    h.tdat.emissivity_nonc_flag=1;
+    h.tdat.cont_flag=1;
+    
+    % Fit Data
+    h.fdat.fit.display=h.invars(5);
+    h.fdat.fit.xleft=h.invars(6);
+    h.fdat.fit.xright=h.invars(7);
+    
+    % Run Initial Calculation of data
+    % ***********************************************
+    h=update_all_data(h);   
+    
+    % Initialize Frequency Plot
+    axes(h.fgui.figure);  
+    cla(h.fgui.figure);
+    cla reset; grid on; hold on;
+    h.fgui.fplot_raw=plot( h.fdat.lambda, h.fdat.yraw,'k.','MarkerSize',3);
+    h.fgui.fplot_fit=plot( h.fdat.lambda, h.fdat.yfit,'-r' );
+    h.fgui.fplot_tmp=plot( h.fdat.lambda, h.fdat.ytmp,'b.','MarkerSize',3 );
+    yl=ylim;
+    h.fgui.fplot_leftx =line([h.fdat.fit.xleft,h.fdat.fit.xleft],...
+                        [yl(1),yl(2)],...
+                        'Color',[0.25,0.25,0.25],'LineStyle','--');
+    h.fgui.fplot_rightx=line([h.fdat.fit.xright,h.fdat.fit.xright],...
+                        [yl(1),yl(2)],...
+                        'Color',[0.25,0.25,0.25],'LineStyle','--');
+    legend('Raw Spectra','Fitted Curve','Held Curve',...
+            'Fit Limits')
+    title('Measured Spectrum')
+    xlabel('Wavelength (nm)');
+    ylabel('Abs. Spectral Irradiance (\muW/cm^2/nm)');
+    hold off;
+    
+    % Initialize Time Plot
+    axes(h.tgui.figure);
+    cla(h.tgui.figure);
+    cla reset; grid on; hold on
+    yyaxis left
+    h.tgui.cont=plot( h.tdat.time, h.tdat.cont, 'k.','MarkerSize',8);
+    h.tgui.nocont=plot( h.tdat.time, h.tdat.nocont, 'kx','MarkerSize',8);
+    h.tgui.vline=line( [h.tdat.time(h.iframe),h.tdat.time(h.iframe)],...
+                         ylim,'Color',[0.25,0.25,0.25],...
+                         'LineStyle','--');
+    yl=ylim;
+    h.tgui.ptext=text( h.tdat.time(h.iframe)*1.02, yl(2)*0.8,{'T = 1000 K'});
+    title('Fitted Temperatures')
+    xlabel('Time (sec)');
+    ylabel('Temperature (Kelvin)');
+    yyaxis right
+    h.tgui.eps=plot( h.tdat.time, h.tdat.eps, 'r.','MarkerSize',8);
+    h.tgui.eps_nonc=plot( h.tdat.time, h.tdat.eps_nonc, 'rx','MarkerSize',8);
+    ylabel('Emissivity');
+    legend('Non-Converged Temps','Converged Temps','Spectrum Frame',...
+           'Converged Emissivity','Non-Converged Emissivity')
+    hold off;
+    
+    % Update Data for plots given initial data set
+    h=update_plot(gui_object,h,[1,1]);
+    
+end
+
+% *************************************************************************
+% Import Mat File using User Input
+% *************************************************************************
+function h=freq_import(gui_object, h,fname)
+    
+    % Get File name and Path
+    flag=1; % Default to load data
+    if (isempty(fname)==1)
+        
+        % Try to get file path and name
+        [file,path] = uigetfile('*.mat');
+        
+        % Terminate loading if not found or user aborts
+        if (file~=0 && path~=0)
+            load([path file]);
+        else
+            flag=0;
+        end
+        
+    else
+        load(fname);
+    end
+    
+    % Copy to H strucutre before lost to scope
+    if (flag==1)
+        h.raw.lambda=wavelength;
+        h.raw.uncal_spectra=SpectraData;
+        h.raw.cal_spectra=FullCalibration;
+        h.raw.dt=IntergrationTime;
+
+        % Command rerun of init
+        h=plot_data_init(gui_object,h);
+    end
+    
+end
+
+% *************************************************************************
+%  DATA UPDATE - Generate new data set
+% *************************************************************************
+function h=update_all_data(h)
+    
+    % Swtich Type of Data - Implies overwritting everything
+    h=update_calibration_data(h);
+    
+    % Get Lambda and Size
+    h.nlambda=size(h.fdat.lambda,1);
+    
+    % Fit Data  h=compute_tmodel(h,i)
+    h.fdat.fit.lambda_left=zeros(h.nframes,1);
+    h.fdat.fit.lambda_left(:)=h.fdat.fit.xleft;
+    h.fdat.fit.lambda_right=zeros(h.nframes,1);
+    h.fdat.fit.lambda_right(:)=h.fdat.fit.xright;
+    h.fdat.fit.matrix=zeros(h.nlambda,h.nframes);
+    
+    % Temp data Init
+	h.tdat.nocont=zeros(h.nframes,1);
+    h.tdat.eps=zeros(h.nframes,1);
+    h.tdat.cont=zeros(h.nframes,1);
+    h.tdat.eps_nonc=zeros(h.nframes,1);
+    h.tdat.usage=ones(h.nframes,1);
+    
+    % Freq Data Init
+    h.fdat.yraw=zeros(h.nlambda,1);
+    h.fdat.yfit=zeros(h.nlambda,1);
+    h.fdat.ytmp=zeros(h.nlambda,1);
+    
+    %Load  Local Frame Data and Temp for plotting
+    h.fdat.yraw(:)=h.fdat.matrix(:,h.iframe);
+    h.fdat.ytmp(:)=h.fdat.yraw(:);
+    
+    % Loop Frames,
+    for i=1:h.nframes
+
+        % Solve Temp and model
+        h = compute_tmodel(h,i);
+        
+        % Clear Terminal and Display Status
+        clc
+        fprintf('Percent Completed = %4.1f\n',100*i/h.nframes)
+        
+    end
+    clc
+    
+    % Initial Time plot Values
+    h.tdat.xlim(1:2)=[0, h.tdat.time(end)];
+    h.tdat.ylim(1)=min([min(h.tdat.nocont),min(h.tdat.cont)]);
+    h.tdat.ylim(2)=max([max(h.tdat.nocont),max(h.tdat.cont)])*1.05;
+    h.tdat.ylim_eps(1)=min([min(h.tdat.eps_nonc),min(h.tdat.eps)]);
+    h.tdat.ylim_eps(2)=max([max(h.tdat.eps_nonc),max(h.tdat.eps)])*1.05;
+    
+end
+
+% COmpute Temp and model from Raw Spectra Data at a given index
+function h=compute_tmodel(h,i)
+    
+    % Compute Left Index
+    [~,ileft]  = min(abs(h.fdat.lambda-h.fdat.fit.lambda_left(i))) ; % Find index of 650 
+    
+    % Compute Right Index
+    [~,iright] = min(abs(h.fdat.lambda-h.fdat.fit.lambda_right(i))) ; % Find index of 650 
+    
+    % Condiitions for root finding
+    y0(1,1)=2000.0; % Initial Guess of Temp (Kelvin)
+    y0(2,1)=0.01;    % Initial Guess of Emissivity
+    fmin_options = optimset('TolX',1.0e-2,'MaxFunEvals',1e4) ;%,'display','off');
+    
+    % Only run if top quartile are above threshold
+    if ( mean(h.fdat.matrix(ileft:iright,i))>h.fdat.spectra_threshold)
+        
+        % fitblackbody
+        fun=@(y)fitblackbody(y, ... % This is passed as symbolic variable (2,1)
+                             h.fdat.lambda(ileft:iright),... % Pass Wavelength
+                             h.fdat.matrix(ileft:iright,i)); % Pass Specta
+        
+        % COmpute Fminsearch to find temp
+        [yout,~,eval]=fminsearch(fun,y0,fmin_options) ; % solve Minimum
+        
+        % COpy to arrays
+        if (eval==1) % Success, add to cont
+            h.tdat.cont(i)=yout(1,1);
+            h.tdat.nocont(i)=NaN;
+            h.tdat.eps(i)=yout(2,1);
+            h.tdat.eps_nonc(i)=NaN;
+            
+           	% Solve Output "Model" y data from temperature
+            h.fdat.fit.matrix(:,i)=h.tdat.eps(i)*blackbody(h.tdat.cont(i),h.fdat.lambda); 
+            
+        else % Not Convergent
+            h.tdat.cont(i)=NaN;
+            h.tdat.nocont(i)=yout(1,1);
+            h.tdat.eps(i)=NaN;
+            h.tdat.eps_nonc(i)=yout(2,1);
+            h.fdat.fit.matrix(:,i)=NaN;
+        end
+        
+    else % Dont run, Nan FIll
+        
+        h.tdat.nocont(i)=NaN;
+        h.tdat.eps(i)=NaN;
+        h.fdat.fit.matrix(:,i)=NaN;
+        
+    end
+    
+    % Get Local Spectra Fit
+    h.fdat.yfit(:)=h.fdat.fit.matrix(:,i);
+    
+end
+
+% *************************************************************************
+%  Switch From Calibrated to Non-Calibrated
+% *************************************************************************
+function h=update_calibration_data(h)
+
+    % Copy calibrated or uncal, uses flag in invars(2)
+    if (h.fdat.calibration_flag==1) % use calibrated
+        
+        % Get Frame Limit
+        h.nframes=size(h.raw.cal_spectra,2);
+        
+        % Check limits
+        h=check_limits(h);
+        
+        % Copy to ydata for raw plot
+        h.fdat.matrix=h.raw.cal_spectra(:,:);
+        
+        % Compute Time Arrays
+        h.tdat.time=linspace(0.0,(h.nframes-1)*h.raw.dt,h.nframes);
+        
+        % Set Slider Step Size to Match
+        h.fgui.slider.Min=1;
+        h.fgui.slider.Max=h.nframes;
+        h.fgui.slider.Value=1;
+        h.fgui.slider.SliderStep=[1/(h.nframes-1) , 1/(h.nframes-1) ];
+        
+        % Reset Ylimit
+        h.fdat.ylim(2)=max(max(h.fdat.matrix));
+        
+        % Reset Y Axis Label
+        h.fgui.figure.YLabel.String='Abs. Spectral Irradiance (\muW/cm^2/nm)';
+        
+        % Make Time-domain Panel Visible
+        h.mgui.plimits_panel.Visible='On';
+        h.mgui.tseries_panel.Visible='On'; 
+        h.tgui.export.Visible='On';
+        h.tgui.ptext.Visible='On';
+        h.fdat.fit.display=1;
+        h.mgui.temp_fit_panel.Visible='On';
+        h.tdat.noncont_flag=1;      % Default plot raw temps
+        h.tdat.emissivity_flag=1;  
+        h.tdat.emissivity_nonc_flag=1;  
+        h.tdat.cont_flag=1;
+        
+    else % Use Raw
+        
+        % Get Frame Limit, possible reset index to fit it
+        h.nframes=size(h.raw.uncal_spectra,2);
+        
+        % Check limits
+        h=check_limits(h);
+        
+        % Copy to YData
+        h.fdat.matrix=h.raw.uncal_spectra(:,:);
+        
+        % Compute Time Arrays
+        h.tdat.time=linspace(0.0,(h.nframes-1)*h.raw.dt,h.nframes);
+        
+        % Set Slider Step Size to Match
+        h.fgui.slider.Min=1;
+        h.fgui.slider.Max=h.nframes;
+        h.fgui.slider.Value=1;
+        h.fgui.slider.SliderStep=[1/(h.nframes-1) , 1/(h.nframes-1) ];
+        
+        % Reset Ylimit
+        h.fdat.ylim(2)=max(max(h.fdat.matrix));
+        
+        % Reset Y Axis Label
+        h.fgui.figure.YLabel.String='Relative Spectral Irradiance';
+        
+        % Make Time Panel NOT Visible
+        h.mgui.plimits_panel.Visible='Off';
+        h.mgui.tseries_panel.Visible='Off'; 
+        h.tgui.export.Visible='Off';
+        h.tgui.ptext.Visible='Off';
+        h.fdat.fit.display=0;
+        h.mgui.temp_fit_panel.Visible='Off';
+        h.tdat.noncont_flag=0;     
+        h.tdat.emissivity_flag=0; 
+        h.tdat.emissivity_nonc_flag=0;
+        h.tdat.cont_flag=0;    
+        
+    end
+    
+end
+    
+% *************************************************************************
+%  PLOT UPDATE - Generate new plot
+% *************************************************************************
+function h=update_plot(gui_object,h,flags)
+    
+    % Set Visibilities
+    h=set_visibilities(h);
+    
+    % Update Fields 
+    h=update_fields(h);
+    
+    % Update Freq Data
+    if (flags(1)==1)
+        
+        % Plot Freq Axes
+        axes(h.fgui.figure);  
+        h.fgui.fplot_raw.YData=h.fdat.yraw;
+        h.fgui.fplot_fit.YData=h.fdat.yfit;
+        h.fgui.fplot_tmp.YData=h.fdat.ytmp;
+        
+        % Set to constant Y limit
+        ymax=h.fdat.ylim(2);
+        ylim([0.0,ymax])
+        
+        % Set log Flag
+        if (h.fdat.log_flag==1) % Use log scale
+            h.fgui.figure.YScale='log';
+            ylim([1e-4,ymax])
+        else
+            h.fgui.figure.YScale='linear';
+        end
+        
+        % Plot Veritcal Line Bookends on Frequency Plot
+        h.fgui.fplot_leftx.XData=[h.fdat.fit.lambda_left(h.iframe),...
+                                  h.fdat.fit.lambda_left(h.iframe)];
+        h.fgui.fplot_leftx.YData=ylim;
+        h.fgui.fplot_rightx.XData=[h.fdat.fit.lambda_right(h.iframe),...
+                                   h.fdat.fit.lambda_right(h.iframe)];
+        h.fgui.fplot_rightx.YData=ylim;       
+        
+        % Set Plot X Limits
+        xlim([ h.fdat.xleft, h.fdat.xright] );
+        
+    end
+    
+    % Plot Time Data
+    if (flags(2)==1)
+        
+        % Plot Temp Axes
+        axes(h.tgui.figure);
+        h.tgui.nocont.YData=h.tdat.nocont;
+        h.tgui.eps.YData=h.tdat.eps;
+        h.tgui.cont.YData=h.tdat.cont;
+        
+        % Set Axes colors
+        yyaxis(h.tgui.figure,'left')
+        ax = gca; ax.YColor = 'k';
+        yyaxis(h.tgui.figure,'right')
+        ax = gca; ax.YColor = 'r';
+        
+        % Left Axis
+        yyaxis(h.tgui.figure,'left');ax=gca;
+        if (h.tdat.log_flag_left_flag==1) % Use log scale
+            ax.YScale='log';
+            ylim( h.tdat.ylim );            
+        else
+            ax.YScale='linear';
+            ylim( h.tdat.ylim );
+        end
+        xlim( h.tdat.xlim );
+        ylim( h.tdat.ylim );
+        
+        % Right Axis
+        yyaxis(h.tgui.figure,'right');ax=gca;
+        if (h.tdat.log_flag_right_flag==1)
+            ax.YScale='log';            
+        else
+            ax.YScale='linear';            
+        end
+        ylim( h.tdat.ylim_eps );
+        
+    end
+    
+    % Add on FFrame line on Time Plot 
+    if (flags(1)==1)
+        
+        % Update Frame line on Time plot
+        axes(h.tgui.figure);
+        yyaxis(h.tgui.figure,'left')
+        h.tgui.vline.XData=[h.tdat.time(h.iframe),h.tdat.time(h.iframe)];
+        
+        % Set Y-Limits Based on Log-Data
+        yl=h.tdat.ylim;
+        if (h.tdat.log_flag_left_flag==1)
+            yl(1)=1e-8;
+        end
+        h.tgui.vline.YData=yl;
+        
+        % Set Text Position
+        if (h.tdat.log_flag_left_flag==1)
+            h.tgui.ptext.Position=[h.tdat.time(h.iframe)*1.02, yl(2)*0.1];
+        else
+            h.tgui.ptext.Position=[h.tdat.time(h.iframe)*1.02, yl(2)*0.9];
+        end
+        
+        % Set Text String
+        val = h.tdat.cont(h.iframe);
+        if (isnan(val)==1)
+            val=h.tdat.nocont(h.iframe);
+        end
+        str =num2str(val,'%8.2g');
+        h.tgui.ptext.String={['T = ',str,' K']};
+        
+    end
+    
+    % Presses h data into Gui object
+    % This ensures all changes to h structure dont fall out of GUI scope!!
+    guidata(gui_object, h);
+    
+end
+
+% *************************************************************************
+% Set Plot Line Visibilities
+% *************************************************************************
+function h=set_visibilities(h)
+     
+    % Set Fit Visibilities
+    if (h.fdat.fit.display==1) 
+        h.fgui.fplot_fit.Visible='On';
+    else
+        h.fgui.fplot_fit.Visible='Off';
+    end
+    
+    % Set Hold Visibilities
+    if (h.fdat.hold_frame==1) 
+        h.fgui.fplot_tmp.Visible='On';
+    else
+        h.fgui.fplot_tmp.Visible='Off';
+    end
+    
+    % Set Raw Temp Vis
+    if (h.tdat.noncont_flag==1) 
+        h.tgui.nocont.Visible='On';
+    else
+        h.tgui.nocont.Visible='Off';
+    end
+    
+    % Set Raw Temp Vis
+    if (h.tdat.emissivity_flag==1) 
+        h.tgui.eps.Visible='On';
+    else
+        h.tgui.eps.Visible='Off';
+    end    
+
+    % Set Raw Temp Vis
+    if (h.tdat.emissivity_nonc_flag==1) 
+        h.tgui.eps_nonc.Visible='On';
+    else
+        h.tgui.eps_nonc.Visible='Off';
+    end    
+    
+    % Set Raw Temp Vis
+    if (h.tdat.cont_flag==1) 
+        h.tgui.cont.Visible='On';
+    else
+        h.tgui.cont.Visible='Off';
+    end    
+
+end
+
+% *************************************************************************
+% Set Plot Line Visibilities
+% *************************************************************************
+function h=update_fields(h)
+    
+    % Set Radio Buttons
+    set( h.fgui.calibration,     'Value', h.fdat.calibration_flag     );
+    set( h.fgui.temp_display,    'Value', h.fdat.fit.display          );
+    set( h.fgui.null,            'Value', h.tdat.usage(h.iframe)      );
+    set( h.fgui.hold,            'Value', h.fdat.hold_frame           );
+    set( h.fgui.log_scale,       'Value', h.fdat.log_flag             );
+    set( h.tgui.ncont_stat,      'Value', h.tdat.noncont_flag         );
+    set( h.tgui.cont_stat,       'Value', h.tdat.cont_flag            );
+    set( h.tgui.eps_stat,         'Value', h.tdat.emissivity_flag     );
+    set( h.tgui.eps_nonc_stat,   'Value', h.tdat.emissivity_nonc_flag );
+    set( h.tgui.log_scale_left,   'Value', h.tdat.log_flag_left_flag  );
+    set( h.tgui.log_scale_right,   'Value',h.tdat.log_flag_right_flag );
+    
+    % Update Frequency Frame Location and Time, min max limits
+    set( h.fgui.time,      'String', num2str(h.tdat.time(h.iframe),'%10.3G') );
+    set( h.fgui.index,          'String', num2str(h.iframe,'%d')          );
+    set( h.fgui.slider,         'Value' , h.iframe                        );
+    set( h.fgui.xleft,          'String', num2str(h.fdat.xleft,   '%5.0f') );
+    set( h.fgui.xright,         'String', num2str(h.fdat.xright,  '%5.0f') );
+    set( h.fgui.ylimit,         'String', num2str(h.fdat.ylim(2),'%5.2f') );
+    
+    % Temperature Fitting Entries
+    set( h.fgui.xleft_fit,      'String', num2str(h.fdat.fit.lambda_left(h.iframe), '%5.2f') );
+    set( h.fgui.xright_fit,     'String', num2str(h.fdat.fit.lambda_right(h.iframe),'%5.2f') );
+    
+    % Temp Plot Limits
+    set( h.tgui.xleft,  'String', num2str(h.tdat.xlim(1),'%5.2g') );
+    set( h.tgui.xright, 'String', num2str(h.tdat.xlim(2),'%5.2g') );
+    set( h.tgui.yleft,  'String', num2str(h.tdat.ylim(1),'%8.0f') );
+    set( h.tgui.yright, 'String', num2str(h.tdat.ylim(2),'%8.0f') );    
+    set( h.tgui.yleft_eps,  'String', num2str(h.tdat.ylim_eps(1),'%8.2g') );
+    set( h.tgui.yright_eps, 'String', num2str(h.tdat.ylim_eps(2),'%8.2g') );    
+    
+end
+
+% *************************************************************************
+% Frequency Domain - Frame Selection - Callbacks
+% *************************************************************************
+
+% Update Frequency Pane
+% ***********************************************
+function h=main_freq_selection(h,gui_object)
+    
+    % TEst limits
+    h=check_limits(h);
+    
+    % Update Freq Data
+    h.fdat.yraw(:)=h.fdat.matrix(:,h.iframe);
+    h.fdat.yfit(:)=h.fdat.fit.matrix(:,h.iframe);
+    
+    % Update Plots
+    h=update_plot(gui_object,h,[1,0]); % This sends program back to replot  
+    
+end
+
+% Update Frame - Index Text Entry
+% ***********************************************
+function h=freq_time_live_Callback(gui_object, h)
+
+    % Retrieve Value Entered (as real, convert to int)
+    h.iframe=str2double( h.fgui.time.String ); % Now real
+    h.iframe=h.nframes*h.iframe/h.tdat.time(end); % now scaled
+    h.iframe=round(h.iframe); % round to integer
+    
+    % Update Data and Plot
+    h=main_freq_selection(h,gui_object);
+    
+end
+
+% Update Frame - Time Text Entry
+% ***********************************************
+function h=freq_index_live_Callback(gui_object, h)
+    
+    % Retrieve Value Entered
+    h.iframe=round( str2double( h.fgui.index.String ) );
+    
+    % Update Data and Plot
+    h=main_freq_selection(h,gui_object);
+    
+end
+
+% Update Frame - Slider Entry
+% ***********************************************
+function h=freq_time_slider_Callback(gui_object, h)
+    
+    % Get Frame Index
+    h.iframe=round( h.fgui.slider.Value );
+    
+    % Update Data and Plot
+    h=main_freq_selection(h,gui_object);
+    
+end
+
+% Set Log-Scale
+% ***********************************************
+function h=freq_log_flag_Callback(gui_object, h)
+    
+    % Retrieve Value Entered (as real, convert to int)
+    h.fdat.log_flag = h.fgui.log_scale.Value;
+    
+    % Update Data and Plot
+    h=update_plot(gui_object,h,[1,0]);
+    
+end
+
+% Set New Ylimit 
+% ***********************************************
+function h = freq_ylimit_live_Callback(gui_object, h)
+    
+    % Retreive Value
+    h.fdat.ylim(2) = str2double( h.fgui.ylimit.String ); % Now real
+    
+    % Update Plot
+    h=update_plot(gui_object,h,[1,0]);    
+    
+end
+
+% Set New X lower-limit
+% ***********************************************
+function h = freq_raw_xleft_live_Callback(gui_object, h)
+    
+    % Retreive Value
+    h.fdat.xleft = str2double( h.fgui.xleft.String ); % Now real
+    
+    % Update Plot
+    h=update_plot(gui_object,h,[1,0]);    
+    
+end
+
+% Set New X upper-limit
+% ***********************************************
+function h = freq_raw_xright_live_Callback(gui_object, h)
+    
+    % Retreive Value
+    h.fdat.xright = str2double( h.fgui.xright.String ); % Now real
+    
+    % Update Plot
+    h=update_plot(gui_object,h,[1,0]);    
+        
+end
+
+% Set New X upper-limit
+% ***********************************************
+function h = freq_calibration_Callback(gui_object, h)
+    
+    % Retreive Value
+    h.fdat.calibration_flag = h.fgui.calibration.Value; % Now real
+    
+    % Reset Data
+    h=update_all_data(h);
+    
+    % Update Plot
+    h=update_plot(gui_object,h,[1,1]);    
+        
+end
+
+% Toggle Hold Frame
+% ***********************************************
+function h = freq_hold_frame_Callback(gui_object, h)
+    
+    % Get State
+    h.fdat.hold_frame=h.fgui.hold.Value;
+    
+    % Get New Temp plot
+    if (h.fdat.hold_frame==1)
+        h.fdat.ytmp(:)=h.fdat.yraw(:);
+    end
+    
+    % Update Plot
+    h=update_plot(gui_object,h,[1,0]);    
+    
+end
+  
+% *************************************************************************
+% Frequency Domain - Temperature Fitting - Callbacks
+% *************************************************************************
+
+% Toggle Display Fit
+% ***********************************************
+function h=freq_temp_display_Callback(gui_object, h)
+    
+    % Retrieve Value Entered (as real, convert to int)
+    h.fdat.fit.display = h.fgui.temp_display.Value;
+    
+    % Update Data and Plot
+    h=update_plot(gui_object,h,[1,0]);
+    
+end
+
+% Update Left Fit lambda 
+% ***********************************************
+function h=freq_fit_xleft_live_Callback(gui_object, h)
+    
+    % Get New Limit
+    h.fdat.fit.lambda_left(h.iframe)=str2double( h.fgui.xleft_fit.String );
+    
+    % Compute New Data
+    h=compute_tmodel(h,h.iframe);
+    
+    % Update Data and Plot
+    h=update_plot(gui_object,h,[1,1]);
+    
+end
+
+% Update Right Fit lambda 
+% ***********************************************
+function h=freq_fit_xright_live_Callback(gui_object, h)
+
+    % Get New Limit
+    h.fdat.fit.lambda_right(h.iframe)=str2double( h.fgui.xright_fit.String );
+    
+    % Compute New Data
+    h=compute_tmodel(h,h.iframe);
+    
+    % Update Data and Plot
+    h=update_plot(gui_object,h,[1,1]);
+        
+end
+
+% Use Fit Toggle
+% ***********************************************
+function h=freq_null_Callback(gui_object, h)
+    
+    % Get Index
+    idx=h.iframe;
+
+    % Get New Limit
+    h.tdat.usage(idx) = h.fgui.null.Value;
+    
+    % Change Values
+    if (h.tdat.usage(idx)==1)  % Change to Accepted
+        h.tdat.cont(idx)=h.tdat.nocont(idx);
+        h.tdat.nocont(idx)=NaN;
+        h.tdat.eps(idx)=h.tdat.eps_nonc(idx);
+        h.tdat.eps_nonc(idx)=NaN;
+        h.fdat.yfit(:)=h.fdat.fit.matrix(:,idx);
+    else % change to nullified
+        h.tdat.nocont(idx)=h.tdat.cont(idx);
+        h.tdat.cont(idx)=NaN;
+        h.tdat.eps_nonc(idx)=h.tdat.eps(idx);
+        h.tdat.eps(idx)=NaN;
+        h.fdat.yfit(:)=NaN;
+    end
+    
+    % Update Data and Plot
+    h=update_plot(gui_object,h,[1,1]);
+    
+end
+
+% *************************************************************************
+% Time Domain - Plot Selection - Callbacks
+% *************************************************************************
+
+% Toggle Plot of Converged Temps
+% ***********************************************
+function h = time_converged_temps_Callback(gui_object, h)
+    
+    % Retreive Value
+    h.tdat.cont_flag = h.tgui.cont_stat.Value; % Now real
+    
+    % Update Plot
+    h=update_plot(gui_object,h,[1,1]);    
+
+end
+
+% Toggle Plot of Non-Converged Temps
+% ***********************************************
+function h = time_non_converged_temps_Callback(gui_object, h)
+
+    % Retreive Value
+    h.tdat.noncont_flag = h.tgui.ncont_stat.Value; % Now real
+    
+    % Update Plot
+    h=update_plot(gui_object,h,[1,1]);    
+    
+end
+
+% Toggle Plot of Converged Emissivity
+% ***********************************************
+function h = time_converged_emissivity_Callback(gui_object, h)
+
+    % Retreive Value
+    h.tdat.emissivity_flag = h.tgui.eps_stat.Value; % Now real
+    
+    % Update Plot
+    h=update_plot(gui_object,h,[1,1]);    
+
+end
+
+% Toggle Plot of Non-Converged Emissivity
+% ***********************************************
+function h = time_converged_emissivity_nonc_Callback(gui_object, h)
+
+    % Retreive Value
+    h.tdat.emissivity_nonc_flag = h.tgui.eps_nonc_stat.Value; % Now real
+    
+    % Update Plot
+    h=update_plot(gui_object,h,[1,1]);    
+    
+end
+
+% *************************************************************************
+% Time Domain - Plot Limits - Callbacks
+% *************************************************************************
+
+% Set Log-Scale - Left
+% ***********************************************
+function h=temp_log_flag_left_Callback(gui_object, h)
+    
+    % Retrieve Value Entered (as real, convert to int)
+    h.tdat.log_flag_left_flag= h.tgui.log_scale_left.Value;
+    
+    % Update Data and Plot
+    h=update_plot(gui_object,h,[1,1]);
+    
+end
+
+% Set Log-Scale - Right
+% ***********************************************
+function h=temp_log_flag_right_Callback(gui_object, h)
+    
+    % Retrieve Value Entered (as real, convert to int)
+    h.tdat.log_flag_right_flag= h.tgui.log_scale_right.Value;
+    
+    % Update Data and Plot
+    h=update_plot(gui_object,h,[0,1]);
+    
+end
+
+% Minimim Time Callback
+% ***********************************************
+function h = time_xleft_live_Callback(gui_object, h)
+    
+    % Retreive Value
+    h.tdat.xlim(1) = str2double( h.tgui.xleft.String ); % Now real
+    
+    % Update Plot
+    h=update_plot(gui_object,h,[0,1]);    
+        
+end
+
+% Maximum Time Callback
+% ***********************************************
+function h = time_xright_live_Callback(gui_object, h)
+    
+    % Retreive Value
+    h.tdat.xlim(2) = str2double( h.tgui.xright.String ); % Now real
+    
+    % Update Plot
+    h=update_plot(gui_object,h,[0,1]);    
+    
+end
+
+% Minimim Temp Axis Callback
+% ***********************************************
+function h=time_yleft_live_Callback(gui_object, h)
+
+    % Retreive Value
+    h.tdat.ylim(1) = str2double( h.tgui.yleft.String ); % Now real
+    
+    % Update Plot
+    h=update_plot(gui_object,h,[0,1]);    
+    
+end
+
+% Maximum Temp Axis Callback
+% ***********************************************
+function h=time_yright_live_Callback(gui_object, h)
+
+    % Retreive Value
+    h.tdat.ylim(2) = str2double( h.tgui.yright.String ); % Now real
+    
+    % Update Plot
+    h=update_plot(gui_object,h,[0,1]);    
+    
+end
+
+% Emissivity Minimum Axis Callback
+% ***********************************************
+function h=time_eps_min_Callback(gui_object, h)
+
+    % Retreive Value
+    h.tdat.ylim_eps(1) = str2double(  h.tgui.yleft_eps.String ); % Now real
+    
+    % Update Plot
+    h=update_plot(gui_object,h,[0,1]);    
+    
+end
+
+% Emissivity Maximum  Axis Callback
+% ***********************************************
+function h=time_eps_max_Callback(gui_object, h)
+
+    % Retreive Value
+    h.tdat.ylim_eps(2) = str2double(  h.tgui.yright_eps.String ); % Now real
+    
+    % Update Plot
+    h=update_plot(gui_object,h,[0,1]);    
+    
+end
+
+% *************************************************************************
+% Auxilary Functions (save, process, export, etc)
+% *************************************************************************
+
+% Export Data to New Matfile 
+% ***********************************************
+function export_data_Callback(hObject, eventdata, handles)
+    
+    % New Copy of data handeles h
+    data=h;
+    
+    % Strip Down Root
+    fields={'invars','fname','mgui','fgui','tgui','iframe'};
+    data=rmfield(data,fields);
+    
+    % Strip fdat
+    fields={'calibration_flag','xleft','xright','ylim','log_flag',...
+            'spectra_threshold','hold_frame','null_frame',''};
+    data.fdat=rmfield(data.fdat,fields);
+    
+    % 
+    
+    % Save to Mat file
+    save('gui_output.mat','data','-v7.3')
+    
+end
+
+% Save Data in Existing Mat file
+% ***********************************************
+function save_mat_Callback(hObject, eventdata, handles)
+
+
+
+end
+
+
+
+
+function h=freq_export_Callback(gui_object, h)
+end
+
+function h=time_export_Callback(gui_object, h)
+end
+
+
+% Move Fields to H strucutre under GUI trees
+% **********************************************
+function h = process_fields(h)
+
+    % COpy Handles - General
+    h.mgui.figure           = h.figure1;
+    h.mgui.freq_panel       = h.freq_panel;
+    h.mgui.time_panel       = h.time_panel;
+    h.mgui.title            = h.title;
+    h.mgui.temp_fit_panel   = h.freq_temp;
+    h.mgui.fframe           = h.freq_frame;
+    h.mgui.plimits_panel    = h.time_plotlimits;
+    h.mgui.tseries_panel    = h.time_series;
+    h.mgui.fit_xleft_text   = h.freq_fit_xleft_text;
+    h.mgui.fit_xright_text  = h.freq_fit_xright_text;
+    h.mgui.ylimit_text      = h.freq_ylimit_text;
+    h.mgui.time_text        = h.freq_time_text;
+    h.mgui.index_text       = h.freq_index_text;
+    h.mgui.xleft_text       = h.freq_raw_xleft_text;
+    h.mgui.xright_text      = h.freq_raw_xright_text;
+    h.mgui.yright_text      = h.time_yright_text;
+    h.mgui.yleft_text       = h.time_yleft_text;
+    h.mgui.xright_text      = h.time_xright_text;
+    h.mgui.xleft_text       = h.time_xleft_text;
+    h.mgui.eps_min_text     = h.time_eps_min_text;
+    h.mgui.eps_max_text     = h.time_eps_max_text;
+    
+    % Copy Handles - Frequency Pane
+    h.fgui.figure           = h.freq_fig;
+    h.fgui.reset            = h.reset_data;
+    h.fgui.import           = h.freq_import;
+    h.fgui.calibration      = h.freq_calibration;
+    h.fgui.log_scale        = h.freq_log_flag;
+    h.fgui.time             = h.freq_time_live;
+    h.fgui.index            = h.freq_index_live;
+    h.fgui.slider           = h.freq_time_slider;
+    h.fgui.ylimit           = h.freq_ylimit_live;
+    h.fgui.xleft            = h.freq_raw_xleft_live;
+    h.fgui.xright           = h.freq_raw_xright_live;
+    h.fgui.temp_display     = h.freq_temp_display;
+    h.fgui.xleft_fit        = h.freq_fit_xleft_live;
+    h.fgui.xright_fit       = h.freq_fit_xright_live;
+    h.fgui.null             = h.freq_null;
+    h.fgui.export           = h.freq_export;
+    h.fgui.hold             = h.freq_hold_frame;
+    
+    % Copy Handles - time Pane
+    h.tgui.figure           = h.time_fig;
+    h.tgui.cont_stat        = h.time_converged_temps;
+    h.tgui.ncont_stat       = h.time_non_converged_temps;
+    h.tgui.eps_stat         = h.time_converged_emissivity;
+    h.tgui.eps_nonc_stat    = h.time_converged_emissivity_nonc;
+    h.tgui.xleft            = h.time_xleft_live;
+    h.tgui.xright           = h.time_xright_live;
+    h.tgui.yleft            = h.time_yleft_live;
+    h.tgui.yright           = h.time_yright_live;
+    h.tgui.yleft_eps        = h.time_eps_min;
+    h.tgui.yright_eps       = h.time_eps_max;
+    h.tgui.log_scale_left   = h.temp_log_flag_left;
+    h.tgui.log_scale_right  = h.temp_log_flag_right;
+    h.tgui.export           = h.time_export;
+    
+    % Remove Original 
+    fields={'reset_data'          ,'freq_import'        ,'freq_calibration'    ,...
+            'freq_log_flag'       ,'freq_time_live'     ,'freq_index_live'     ,...
+            'freq_time_slider'    ,'freq_ylimit_live'   ,'freq_raw_xleft_live' ,...
+            'freq_raw_xright_live','freq_temp_display'  ,'freq_fit_xleft_live' ,...
+            'freq_fit_xright_live','freq_null'          ,'freq_export'         ,...
+            'freq_hold_frame'     ,'time_converged_temps'    ,'time_non_converged_temps',...
+            'time_converged_emissivity'  ,'time_xleft_live'    ,'time_xright_live'    ,...
+            'time_yleft_live'     ,'time_yright_live'   ,'temp_log_flag_left'  ,...
+            'time_export'         ,'freq_fig'           ,'time_fig'            ,...
+            'figure1'             ,'freq_panel'         ,'time_panel'          ,...
+            'title'               ,'freq_temp'          ,'freq_frame'          ,...
+            'time_plotlimits'     ,'time_series'        ,'freq_fit_xleft_text' ,...
+            'freq_fit_xright_text','freq_ylimit_text'   ,'freq_time_text'      ,...
+            'freq_index_text'     ,'freq_raw_xleft_text','freq_raw_xright_text',...
+            'time_yright_text'    ,'time_yleft_text'    ,'time_xright_text'    ,...
+            'time_xleft_text'     ,'time_eps_min_text'  ,'time_eps_max_text'   ,...
+            'temp_log_flag_right','time_converged_emissivity_nonc','save_mat',...
+            'time_eps_max','time_eps_min'};
+    
+    % Remove Fields
+    h=rmfield(h,fields);
+    
+end
+
+% Check Index Range
+% ***********************************************
+function h=check_limits(h)
+    
+    % Check Frame Limits 
+    if (h.iframe>h.nframes)
+        h.iframe=h.nframes;
+    elseif(h.iframe<1)
+        h.iframe=1;
+    end
+
+end
+
+% Reset Data, Rerun plot_inti
+% ***********************************************
+function reset_data_Callback(gui_object,h)
+	h=plot_data_init(gui_object,h);
+end
+
+% Output Function
+% ***********************************************
+function varargout = OceanOptics_replay_OutputFcn(~, ~, ~) 
+end

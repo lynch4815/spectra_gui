@@ -1,0 +1,13 @@
+
+
+Joel Lynch - July 27th, 2019
+Known Issues: please add to the list any observed bugs
+
+ToDo:
+- Save to Mat FIle - Button is inactive
+- Debug yyright/left scaling and mismatch with live windows
+- Figure out why fit-line doesn't show initialiy
+- Reset X-slider range for lower plots
+- Blue/Green Circle of current data point (Time Plot)
+- export to figure button callbacks
+- parallel for loop for speedup

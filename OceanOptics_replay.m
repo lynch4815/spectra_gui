@@ -180,9 +180,11 @@ function h=freq_import(gui_object, h,fname)
         [file,path] = uigetfile('*.mat');
         
         % Terminate loading if not found or user aborts
-        if (file~=0 && path~=0)
-            load([path file]);
+        file_path=strcat(path,file);
+        if (exist(file_path)==2)
+            load(file_path);
         else
+            disp('Issue with Reading File')
             flag=0;
         end
         
@@ -192,15 +194,40 @@ function h=freq_import(gui_object, h,fname)
     
     % Copy to H strucutre before lost to scope
     if (flag==1)
+        
+        % Extract Data
         h.raw.lambda=wavelength;
         h.raw.uncal_spectra=SpectraData;
         h.raw.cal_spectra=FullCalibration;
         h.raw.dt=IntergrationTime;
-
+        
+        % Set flag for whether raw contains fit struct
+        if (exist('stored_fits')==0) % No flag exists, so make one
+            
+            h.raw.stored_fits=0;
+            
+        else % extract data
+            
+            % Default stored fits to on
+            h.raw.stored_fits=1;
+            
+            % Copy Data
+            h.raw.cont(:)=cont(:);
+            h.raw.nocont(:)=nocont(:);
+            h.raw.eps(:)=eps(:);
+            h.raw.eps_nonc(:)=eps_nonc(:);
+            h.raw.fit_matrix=matrix;
+            h.raw.lambda_left=lambda_left;
+            h.raw.lambda_right=lambda_right;
+            
+        end
+        
         % Command rerun of init
         h=plot_data_init(gui_object,h);
+        
     end
     
+
 end
 
 % *************************************************************************
@@ -232,23 +259,40 @@ function h=update_all_data(h)
     h.fdat.yraw=zeros(h.nlambda,1);
     h.fdat.yfit=zeros(h.nlambda,1);
     h.fdat.ytmp=zeros(h.nlambda,1);
-    
-    %Load  Local Frame Data and Temp for plotting
-    h.fdat.yraw(:)=h.fdat.matrix(:,h.iframe);
-    h.fdat.ytmp(:)=h.fdat.yraw(:);
-    
-    % Loop Frames,
-    for i=1:h.nframes
-
-        % Solve Temp and model
-        h = compute_tmodel(h,i);
         
-        % Clear Terminal and Display Status
+    % If there is no stored data 
+    if (h.raw.stored_fits==0) 
+        
+        % Loop Frames and solve 
+        for i=1:h.nframes
+            
+            % Solve Temp and model
+            h = compute_tmodel(h,i);
+            
+            % Clear Terminal and Display Status
+            clc
+            fprintf('Percent Completed = %4.1f\n',100*i/h.nframes)
+            
+        end
         clc
-        fprintf('Percent Completed = %4.1f\n',100*i/h.nframes)
+        
+    else % Load Fits from File
+        
+        % Copy Data
+        h.tdat.cont=h.raw.cont;
+        h.tdat.nocont=h.raw.nocont;
+        h.tdat.eps=h.raw.eps;
+        h.tdat.eps_nonc=h.raw.eps_nonc;
+        h.fdat.fit.matrix=h.raw.fit_matrix;
+        h.fdat.fit.lambda_left=h.raw.lambda_left;
+        h.fdat.fit.lambda_right=h.raw.lambda_right;
         
     end
-    clc
+    
+    % Copy to Plotting Vectors
+    h.fdat.yraw(:)=h.fdat.matrix(:,h.iframe);
+    h.fdat.ytmp(:)=h.fdat.yraw;
+    h.fdat.yfit(:)=h.fdat.fit.matrix(:,h.iframe);
     
     % Initial Time plot Values
     h.tdat.xlim(1:2)=[0, h.tdat.time(end)];
@@ -304,14 +348,13 @@ function h=compute_tmodel(h,i)
         
     else % Dont run, Nan FIll
         
+        h.tdat.cont(i)=NaN;
         h.tdat.nocont(i)=NaN;
         h.tdat.eps(i)=NaN;
+        h.tdat.eps_nonc(i)=NaN;
         h.fdat.fit.matrix(:,i)=NaN;
         
     end
-    
-    % Get Local Spectra Fit
-    h.fdat.yfit(:)=h.fdat.fit.matrix(:,i);
     
 end
 
@@ -1014,13 +1057,31 @@ end
 % Save Data in Existing Mat file
 % ***********************************************
 function h=save_mat_Callback(gui_object, h)
-
-
-
+    
+    % Copy raw data
+    wavelength=h.raw.lambda;
+    SpectraData=h.raw.uncal_spectra;
+    FullCalibration=h.raw.cal_spectra;
+    IntergrationTime=h.raw.dt;
+    
+    % Copy Fit Data
+    cont        = h.tdat.cont; %h.raw.cont;
+    nocont      = h.tdat.nocont; %=h.raw.nocont;
+    eps         = h.tdat.eps; %=h.raw.eps;
+    eps_nonc    = h.tdat.eps_nonc; %=h.raw.eps_nonc;
+    matrix      = h.fdat.fit.matrix; %=h.raw.fit_maxtrix;
+    lambda_left = h.fdat.fit.lambda_left; %=h.raw.lambda_left;
+    lambda_right= h.fdat.fit.lambda_right; %=h.raw.lambda_right;
+    
+    % Set Stored_fits flag to on
+    stored_fits=1;
+    
+    % Save 
+    save(h.fname,'wavelength','SpectraData','FullCalibration',...
+                'IntergrationTime','cont','nocont','eps','eps_nonc',...
+                 'matrix','lambda_left','lambda_right','stored_fits','-v7.3');
+    
 end
-
-
-
 
 function h=freq_export_Callback(gui_object, h)
 end

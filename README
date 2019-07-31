@@ -4,8 +4,6 @@ Joel Lynch - July 27th, 2019
 Known Issues: please add to the list any observed bugs
 
 ToDo:
-- clean up first plot, add vis afgter data is live
-- change text to circles
 - reset slider range when xlimits change
 
 - export figure
